@@ -27,7 +27,13 @@ Only `RUNNING` is operational according to `CQSMCStateMachine::CanOperate`. `OnT
 
 The provider fetches three series (exec / HTF / LTF); snapshot arrays are series ordered, and closed-only mode makes index `1` the newest eligible bar. Analysis math reads through the snapshot contract. Structure points use a configurable n-bar fractal. Bias combines EMA separation, HTF close-vs-EMA and the latest swing sequence. Zones use swing-plus-opposite-displacement and clustered swing extremes. Liquidity identifies clustered levels and wick-through/close-back sweeps. SVP distributes each candle's available tick volume across the price bins intersected by its range; it is a bar-level approximation, not exchange volume-at-price.
 
-These models are explicitly replaceable heuristics. No claim is made that their parameters are canonical QSMC strategy rules.
+These models are explicitly replaceable heuristics. The current selected ICT-inspired watch path is a strict sequence: recent raid of a completed Asia/London/prior-day session range during configured London/New York window, a post-raid displacement close through a previously confirmed opposing swing (MSS proxy), followed by a current retest of an unfilled post-MSS FVG. It is a chart/watch candidate only, not an entry instruction, and it does not estimate success probability. The server-time windows are manually editable and are not DST-aware.
+
+The secondary model detects a historical displacement close through a confirmed swing, classifies a local BOS/CHoCH proxy, and waits for the current retest of an unmitigated swing/displacement zone used as an order-block proxy. Pivot confirmation timing is checked against the historical break to avoid using later-confirmed swings. This remains a replaceable heuristic, not a canonical OB definition.
+
+A shared hard filter requires a non-neutral matching HTF close/EMA bias, a configured London/New York window, and a direction-aligned recent session liquidity raid for either model. A pivot-label guide annotates up to eight alternating fractal swings with `1..5/A..C`; the final pivot may add at most ±3 confluence points after a setup has qualified. It never creates a candidate, and Elliott rules/degree/alternates are not validated. The order-flow line computes close-location-weighted tick volume and relative volume, not aggressor delta/CVD/DOM/footprint. Volume Profile and tick-volume proxy modify points only when their data is ready. All scores are heuristic points, not calibrated probabilities.
+
+Each closed-bar evaluation appends primary-model, alternate-model, and arbiter outcomes/reasons to `MQL5/Files/QSMC/opportunities_<magic>.csv` (or the Strategy Tester agent's `MQL5/Files/QSMC` folder). File-write failure is diagnostic-only and never changes signal decisions. No claim is made that these heuristics are canonical QSMC/ICT rules.
 
 ## Decision and execution boundary
 

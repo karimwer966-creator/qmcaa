@@ -11,7 +11,8 @@
 #define QSMC_VERSION_PATCH    0
 #define QSMC_VERSION_STRING   "1.0.0"
 
-// Compile-time build stamp: uses the platform's __DATE__ macro.
+// Keep the runtime version string free of compiler-specific macros. In MQL5,
+// __DATE__ is not consistently exposed as a string argument to StringFormat.
 string QSMC_Version()
 {
    return QSMC_VERSION_STRING;
@@ -19,7 +20,7 @@ string QSMC_Version()
 
 string QSMC_VersionFull()
 {
-   return StringFormat("%s v%s (compiled %s)", QSMC_NAME, QSMC_VERSION_STRING, __DATE__);
+   return StringFormat("%s v%s", QSMC_NAME, QSMC_VERSION_STRING);
 }
 
 // Machine readable version for journals / state files.

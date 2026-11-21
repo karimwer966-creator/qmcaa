@@ -13,6 +13,7 @@
 #include "../Infrastructure/QSMC_Logger.mqh"
 #include "../Infrastructure/QSMC_StateStore.mqh"
 #include "../Infrastructure/QSMC_Stats.mqh"
+#include "../Infrastructure/QSMC_OpportunityAudit.mqh"
 #include "../Data/QSMC_DataProvider.mqh"
 #include "../Data/QSMC_MarketData.mqh"
 #include "../Data/QSMC_DataReadiness.mqh"
@@ -37,6 +38,7 @@ private:
    CQSMCRoot m_root;
    CQSMCClock m_clock;
    CQSMCLogger m_logger;
+   CQSMCOpportunityAuditLog m_auditLog;
    CQSMCStateStore m_store;
    CQSMCStats m_stats;
    CQSMCDataProvider *m_provider;
@@ -56,6 +58,7 @@ private:
    string m_dataText;
    string m_analysisText;
    string m_decisionText;
+   string m_opportunityText;
    string m_lastError;
    bool m_initialised;
    bool m_haveSnapshot;
@@ -69,6 +72,34 @@ private:
       m_decision.Reject(code,source,reason);
       m_lastDecisionValid=false;
       m_decisionText="NO TRADE | "+reason;
+   }
+
+   void WriteAuditRecord(const SQSMCScanContext &context,const datetime bar,
+                         const SQSMCOpportunityRecord &record)
+   {
+      if(!m_auditLog.Ready())return;
+      int elliottHint=0;
+      if(context.elliottReady && record.direction!=QSMC_DIR_NONE)
+      {
+         bool aligned=(record.direction==QSMC_DIR_BUY?
+                       context.elliottLastType==QSMC_SWING_LOW:
+                       context.elliottLastType==QSMC_SWING_HIGH);
+         bool opposed=(record.direction==QSMC_DIR_BUY?
+                       context.elliottLastType==QSMC_SWING_HIGH:
+                       context.elliottLastType==QSMC_SWING_LOW);
+         elliottHint=(aligned?1:(opposed?-1:0));
+      }
+      if(!m_auditLog.Append(bar,m_cfg.symbol,m_cfg.exec_tf,record.model,record.status,
+                            record.stage,record.direction,record.scorePoints,
+                            context.price,context.atr,context.htfBias,
+                            context.sessionSummary,context.sweptSessionHigh,
+                            context.sweptSessionLow,context.relativeTickVolume,
+                            context.flowPressure,(context.svpReady?context.poc:0.0),
+                            (context.svpReady?context.vah:0.0),
+                            (context.svpReady?context.val:0.0),elliottHint,record.reason))
+      {
+         m_diagnostics.Warn("OPPORTUNITY_AUDIT",m_auditLog.LastError());
+      }
    }
 
    bool RefreshAndEvaluate(const bool allowStart)
@@ -126,6 +157,10 @@ private:
       if(bar==m_lastDecisionBar)return true;
       m_lastDecisionBar=bar;
 
+      // Build volume profile before the scanner so it can contribute as an
+      // optional, explicitly auditable confluence factor on this same bar.
+      m_svp.Build(snap,QSMC_SNAP_EXEC,m_cfg.svp_lookback,m_cfg.svp_bins,m_cfg.svp_value_area_pct);
+      m_scanners.SetValueContext(m_svp.IsReady(),m_svp.Poc(),m_svp.Vah(),m_svp.Val());
       string scanWhy;
       double tolerance=(double)m_cfg.zone_tolerance_points*snap.Point();
       if(!m_scanners.Scan(snap,m_cfg.structure_lookback,m_cfg.swing_left,
@@ -136,31 +171,113 @@ private:
          m_diagnostics.Warn("ANALYSIS",scanWhy);return true;
       }
 
-      m_svp.Build(snap,QSMC_SNAP_EXEC,m_cfg.svp_lookback,m_cfg.svp_bins,m_cfg.svp_value_area_pct);
-      m_scanners.SetValueContext(m_svp.IsReady(),m_svp.Poc(),m_svp.Vah(),m_svp.Val());
+      SQSMCScanContext context;
+      m_scanners.ContextCopy(context);
       m_renderer.ClearLayers();
       datetime layerUntil=TimeCurrent()+PeriodSeconds(m_cfg.exec_tf)*20;
-      for(int z=0;z<m_scanners.ZoneCount();z++)
+      // Keep the chart readable: draw only the best bias-aligned nearby POIs.
+      for(int z=0;z<m_cfg.max_chart_zones;z++)
       {
          SQSMCZone zone;
-         if(!m_scanners.GetZone(z,zone))continue;
+         if(!m_scanners.GetRankedZone(z,zone))break;
          color zoneColor=(zone.IsDemandLike()?clrSeaGreen:clrIndianRed);
          m_renderer.DrawZone(zone,zoneColor,layerUntil);
       }
-      SQSMCScanContext context;
-      m_scanners.ContextCopy(context);
-      m_analysisText=context.summary+" | "+m_svp.Describe();
+      if(context.alternateCandidate)
+      {
+         SQSMCBreakOrderBlock altSetup;
+         m_scanners.GetAlternateSetup(altSetup);
+         if(altSetup.orderBlock.created>0 && altSetup.orderBlock.top>altSetup.orderBlock.bottom)
+         {
+            m_renderer.DrawBand("ALT_OB_RETEST",altSetup.orderBlock.created,
+                                altSetup.orderBlock.top,layerUntil,
+                                altSetup.orderBlock.bottom,clrMediumPurple);
+            m_renderer.DrawText("ALT_OB_LABEL",TimeCurrent(),altSetup.orderBlock.Mid(),
+                                altSetup.breakKind+" OB",clrMediumPurple,8);
+         }
+      }
+      SQSMCSessionContext sessionView;
+      m_scanners.GetSessionContext(sessionView);
+      if(sessionView.ready && sessionView.activeSession=="LONDON" &&
+         sessionView.ranges[QSMC_SESSION_ASIA].currentReady)
+      {
+         m_renderer.DrawLevel("ASIA_HIGH",sessionView.ranges[QSMC_SESSION_ASIA].currentHigh,clrDeepSkyBlue);
+         m_renderer.DrawLevel("ASIA_LOW",sessionView.ranges[QSMC_SESSION_ASIA].currentLow,clrDeepSkyBlue);
+         m_renderer.DrawText("ASIA_HIGH_LABEL",TimeCurrent(),sessionView.ranges[QSMC_SESSION_ASIA].currentHigh,"Asia H",clrDeepSkyBlue,8);
+         m_renderer.DrawText("ASIA_LOW_LABEL",TimeCurrent(),sessionView.ranges[QSMC_SESSION_ASIA].currentLow,"Asia L",clrDeepSkyBlue,8);
+      }
+      else if(sessionView.ready && sessionView.activeSession=="NEW_YORK")
+      {
+         if(sessionView.ranges[QSMC_SESSION_ASIA].currentReady)
+         {
+            m_renderer.DrawLevel("ASIA_HIGH",sessionView.ranges[QSMC_SESSION_ASIA].currentHigh,clrDeepSkyBlue);
+            m_renderer.DrawLevel("ASIA_LOW",sessionView.ranges[QSMC_SESSION_ASIA].currentLow,clrDeepSkyBlue);
+            m_renderer.DrawText("ASIA_HIGH_LABEL",TimeCurrent(),sessionView.ranges[QSMC_SESSION_ASIA].currentHigh,"Asia H",clrDeepSkyBlue,8);
+            m_renderer.DrawText("ASIA_LOW_LABEL",TimeCurrent(),sessionView.ranges[QSMC_SESSION_ASIA].currentLow,"Asia L",clrDeepSkyBlue,8);
+         }
+         if(sessionView.ranges[QSMC_SESSION_LONDON].currentReady)
+         {
+            m_renderer.DrawLevel("LONDON_HIGH",sessionView.ranges[QSMC_SESSION_LONDON].currentHigh,clrDarkOrange);
+            m_renderer.DrawLevel("LONDON_LOW",sessionView.ranges[QSMC_SESSION_LONDON].currentLow,clrDarkOrange);
+            m_renderer.DrawText("LONDON_HIGH_LABEL",TimeCurrent(),sessionView.ranges[QSMC_SESSION_LONDON].currentHigh,"London H",clrDarkOrange,8);
+            m_renderer.DrawText("LONDON_LOW_LABEL",TimeCurrent(),sessionView.ranges[QSMC_SESSION_LONDON].currentLow,"London L",clrDarkOrange,8);
+         }
+      }
+      if(m_cfg.draw_fvg_zones)
+      {
+         int drawnFvg=0;
+         for(int f=0;f<m_scanners.FvgCount() && drawnFvg<3;f++)
+         {
+            SQSMCFairValueGap gap;
+            if(!m_scanners.GetFvg(f,gap) || gap.filled)continue;
+            if(context.atr>0.0 && MathAbs(gap.Mid()-context.price)>context.atr*5.0)continue;
+            if(gap.direction==QSMC_FVG_BULLISH && context.bias==QSMC_BIAS_BEARISH)continue;
+            if(gap.direction==QSMC_FVG_BEARISH && context.bias==QSMC_BIAS_BULLISH)continue;
+            color fvgColor=(gap.direction==QSMC_FVG_BULLISH?clrDarkSeaGreen:clrLightSalmon);
+            m_renderer.DrawBand("FVG_"+IntegerToString(drawnFvg),gap.formed,gap.top,
+                                layerUntil,gap.bottom,fvgColor);
+            drawnFvg++;
+         }
+      }
+      if(m_cfg.draw_elliott_labels)
+      {
+         SQSMCElliottGuideResult waves;
+         m_scanners.GetElliottGuide(waves);
+         if(waves.ready)
+            for(int w=0;w<waves.count;w++)
+               m_renderer.DrawText("WAVE_"+IntegerToString(w),waves.points[w].time,
+                                   waves.points[w].price,waves.points[w].label,
+                                   clrGold,9);
+      }
+      m_analysisText=context.summary+" | "+m_svp.Describe()+
+                     " | primary points="+DoubleToString(context.ictConfluence,0)+
+                     " alternate points="+DoubleToString(context.alternateConfluence,0)+
+                     " (heuristic, not probability)";
 
       CQSMCSignalRegistry registry;
-      CQSMCOpportunityFunnel::Build(context,registry);
+      SQSMCOpportunityAudit opportunityAudit;
+      CQSMCOpportunityFunnel::Build(context,bar,m_cfg.min_confidence,
+                                    registry,opportunityAudit);
+      m_opportunityText=opportunityAudit.primary.status+": "+opportunityAudit.primary.reason+
+                        " | "+opportunityAudit.alternate.status+": "+opportunityAudit.alternate.reason;
       m_decision.Reset();
       bool selected=CQSMCArbiter::Resolve(registry,m_cfg.min_confidence,bar,m_decision);
       if(!selected && m_decision.rejectionCount==0)
          m_decision.Reject(QSMC_ERR_NO_DECISION,"decision","no candidate selected");
       m_lastDecisionValid=selected;
       m_decisionText=(selected ? QSMC_DirectionToString(m_decision.direction)+
-                      " confidence="+DoubleToString(m_decision.confidence,2)+" | "+m_decision.explanation
+                      " confluence-score="+DoubleToString(m_decision.confidence,2)+
+                      " (not probability) | "+m_decision.explanation
                       : "NO TRADE | "+m_decision.explanation);
+      WriteAuditRecord(context,bar,opportunityAudit.primary);
+      WriteAuditRecord(context,bar,opportunityAudit.alternate);
+      SQSMCOpportunityRecord arbiterAudit;arbiterAudit.Reset();
+      arbiterAudit.model="ARBITER";arbiterAudit.stage=(selected?"RESOLVED":"NO_TRADE");
+      arbiterAudit.status=(selected?"ACCEPTED":"REJECTED");
+      arbiterAudit.direction=(selected?m_decision.direction:QSMC_DIR_NONE);
+      arbiterAudit.scorePoints=(selected?m_decision.confidence*100.0:0.0);
+      arbiterAudit.reason=m_decisionText;
+      WriteAuditRecord(context,bar,arbiterAudit);
       for(int i=0;i<m_decision.rejectionCount;i++)
          m_diagnostics.Info("REJECT_"+IntegerToString(i+1),m_decision.rejections[i].source+": "+m_decision.rejections[i].reason);
       m_analysisCount++;
@@ -183,6 +300,13 @@ private:
       d.health=m_healthText;
       d.readiness=m_dataText;
       d.analysis=m_analysisText;
+      SQSMCScanContext context;
+      m_scanners.ContextCopy(context);
+      d.sessions=context.sessionSummary;
+      d.ict=context.ictStage+" "+context.alternateStage;
+      d.opportunities=m_opportunityText;
+      d.orderFlow=context.orderFlowSummary;
+      d.elliott=context.elliottSummary;
       d.decision=m_decisionText;
       d.safety=m_safety.Reason();
       d.execution=m_execution.Describe();
@@ -207,7 +331,7 @@ public:
    {
       m_provider=NULL;m_initialised=false;m_haveSnapshot=false;m_lastDecisionValid=false;
       m_lastDecisionBar=0;m_analysisCount=0;m_healthText="unknown";m_dataText="initializing";
-      m_analysisText="";m_decisionText="NO TRADE";m_lastError="";
+      m_analysisText="";m_decisionText="NO TRADE";m_opportunityText="";m_lastError="";
       m_decision.Reset();
    }
 
@@ -219,8 +343,13 @@ public:
       if(!CQSMCBootstrap::Start(m_root,cfg,m_store,m_diagnostics,result))return false;
       string logPath=QSMC_FILE_FOLDER+"qsmc_"+IntegerToString((long)m_root.Magic())+".log";
       m_logger.Init(cfg.log_level,cfg.enable_log_file,logPath,m_root.InstanceId());
+      if(!m_auditLog.Init(m_root.Magic()))
+         m_diagnostics.Warn("OPPORTUNITY_AUDIT",m_auditLog.LastError());
+      else
+         m_logger.Info("AUDIT","opportunity records append to "+m_auditLog.FileName());
       m_clock.Init(cfg.symbol);
       m_clock.TrackTimeframe(cfg.exec_tf);m_clock.TrackTimeframe(cfg.htf);m_clock.TrackTimeframe(cfg.ltf);
+      m_scanners.ConfigureICT(cfg);
       m_provider=new CQSMCDataProvider();
       if(m_provider==NULL || !m_provider.Init(cfg.symbol))
       {result.Set(QSMC_ERR_SYMBOL_UNAVAILABLE,"market data provider failed to initialize");m_root.Fail(result.message);return false;}

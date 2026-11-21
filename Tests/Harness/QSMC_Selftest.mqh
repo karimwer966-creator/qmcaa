@@ -100,6 +100,51 @@ public:
       fixture.AttachBars(QSMC_SNAP_HTF,htfBars,ArraySize(htfBars));
       fixture.AttachBars(QSMC_SNAP_LTF,ltfBars,ArraySize(ltfBars));
       fixture.SetCaptured(TimeCurrent());
+      // Create a controlled bullish three-candle gap at shift 2 and a
+      // partial retest on the latest closed candle at shift 1.
+      execBars[1].open=100.55;execBars[1].close=100.70;execBars[1].low=100.40;execBars[1].high=100.80;
+      execBars[2].open=100.00;execBars[2].close=100.10;execBars[2].low=99.90;execBars[2].high=100.20;
+      execBars[3].open=100.30;execBars[3].close=100.50;execBars[3].low=100.25;execBars[3].high=100.65;
+      execBars[4].open=101.20;execBars[4].close=101.30;execBars[4].low=101.00;execBars[4].high=101.50;
+      fixture.AttachBars(QSMC_SNAP_EXEC,execBars,ArraySize(execBars));
+      CQSMCFairValueGaps fvgBuilder;
+      report.Check(fvgBuilder.Build(fixture,QSMC_SNAP_EXEC,100,0.10),
+                   "FVG builder detects controlled three-candle imbalance");
+      SQSMCFairValueGap retestedGap;
+      report.Check(fvgBuilder.BestCurrentRetest(QSMC_FVG_BULLISH,retestedGap),
+                   "unfilled bullish FVG retest is identified");
+
+      CQSMCSessionContext sessionFixture;sessionFixture.Reset();
+      sessionFixture.ready=true;sessionFixture.activeSession="LONDON";
+      sessionFixture.inLondonOrNewYork=true;
+      SQSMCICTSetup ictTest;
+      CQSMCStructure fixtureStructure;
+      fixtureStructure.Detect(fixture,QSMC_SNAP_EXEC,150,2,2);
+      CQSMCICTSetupModel::Evaluate(fixture,QSMC_SNAP_EXEC,fixtureStructure,
+                                   sessionFixture,fvgBuilder,2,1.0,ictTest);
+      report.Check(ictTest.ready && ictTest.stage==QSMC_ICT_WAIT_SWEEP && !ictTest.candidate,
+                   "ICT funnel waits for sweep and does not fabricate a setup");
+      sessionFixture.sweptLow=true;sessionFixture.sweptHigh=true;
+      sessionFixture.sweptLowLevel=99.0;sessionFixture.sweptHighLevel=102.0;
+      sessionFixture.sweptLowShift=4;sessionFixture.sweptHighShift=4;
+      CQSMCICTSetupModel::Evaluate(fixture,QSMC_SNAP_EXEC,fixtureStructure,
+                                   sessionFixture,fvgBuilder,2,1.0,ictTest);
+      report.Check(ictTest.stage==QSMC_ICT_AMBIGUOUS && !ictTest.candidate,
+                   "two-sided session raid is rejected as ambiguous");
+
+      SQSMCOrderFlowProxyResult flowProxy;
+      report.Check(CQSMCOrderFlowProxy::Calculate(fixture,QSMC_SNAP_EXEC,20,flowProxy) &&
+                   StringFind(flowProxy.diagnostic,"no centralized aggressor")>=0,
+                   "order-flow output is explicitly marked as a volume proxy");
+
+      CQSMCSessionContext sessionResult;
+      report.Check(CQSMCSessions::Evaluate(fixture,QSMC_SNAP_EXEC,true,
+                         120,480,540,720,900,1080,sessionResult),
+                   "broker-server session analysis evaluates closed bars");
+      report.Check(!CQSMCSessions::Evaluate(fixture,QSMC_SNAP_EXEC,false,
+                         120,480,540,720,900,1080,sessionResult),
+                   "disabled session analysis fails closed");
+
       CQSMCStructure closedA,closedB;
       bool structA=closedA.Detect(fixture,QSMC_SNAP_EXEC,150,2,2);
       MqlRates changedExec[];ArrayResize(changedExec,ArraySize(execBars));
@@ -132,6 +177,15 @@ public:
       SQSMCScanContext analysis;scanners.ContextCopy(analysis);
       report.Check(analysis.valid && analysis.atr>0.0 && analysis.swingCount>0,
                    "analysis output contains validated ATR and structure evidence");
+      bool newestFirst=true;int previousShift=-1;
+      for(int si=0;si<scanners.StructureCount();si++)
+      {
+         SQSMCStructurePoint point;
+         if(!scanners.GetStructurePoint(si,point))continue;
+         if(previousShift>=0 && point.shift<=previousShift)newestFirst=false;
+         previousShift=point.shift;
+      }
+      report.Check(newestFirst,"confirmed structure points are exposed newest-first");
       CQSMCSvpCore profile;
       report.Check(profile.Build(fixture,QSMC_SNAP_EXEC,100,30,70.0),
                    "SVP core builds bounded profile from fixture");
@@ -150,6 +204,45 @@ public:
       report.Check(!CQSMCExecutionPreflight::Validate(invalidIntent,cfg,emptySnapshot,emptyRoot,
                                                       uninitialisedSafety,account,1,why),
                    "execution preflight rejects invalid intent before environment access");
+
+      // Both setup models are subject to common HTF/session/liquidity gates;
+      // optional volume/Profile/Elliott data only adjust confluence points.
+      SQSMCScanContext funnelContext;funnelContext.Reset();
+      funnelContext.valid=true;funnelContext.price=100.0;funnelContext.atr=1.0;
+      funnelContext.htfBias=QSMC_BIAS_BULLISH;funnelContext.inKillzone=true;
+      funnelContext.sweptSessionLow=true;funnelContext.flowReady=true;
+      funnelContext.flowPressure=0.4;funnelContext.relativeTickVolume=1.8;
+      funnelContext.svpReady=true;funnelContext.aboveValue=true;
+      funnelContext.elliottReady=true;funnelContext.elliottLastType=QSMC_SWING_LOW;
+      funnelContext.ictCandidate=true;funnelContext.ictDirection=QSMC_DIR_BUY;
+      funnelContext.ictStage="WATCH_CANDIDATE";funnelContext.ictConfluence=70.0;
+      funnelContext.ictSummary="raid-MSS-FVG fixture";
+      funnelContext.alternateCandidate=true;funnelContext.alternateDirection=QSMC_DIR_BUY;
+      funnelContext.alternateStage="WATCH_CANDIDATE";funnelContext.alternateConfluence=65.0;
+      funnelContext.alternateSummary="BOS/OB fixture";
+      CQSMCSignalRegistry funnelRegistry;SQSMCOpportunityAudit audit;
+      CQSMCOpportunityFunnel::Build(funnelContext,TimeCurrent(),0.55,funnelRegistry,audit);
+      report.Check(funnelRegistry.Count()==2 && audit.primary.status=="ACCEPTED" &&
+                   audit.alternate.status=="ACCEPTED",
+                   "primary and secondary models register when common filters pass");
+      funnelContext.htfBias=QSMC_BIAS_BEARISH;
+      CQSMCOpportunityFunnel::Build(funnelContext,TimeCurrent(),0.55,funnelRegistry,audit);
+      report.Check(funnelRegistry.Count()==0 &&
+                   StringFind(audit.primary.reason,"conflicts with HTF Bias")>=0 &&
+                   StringFind(audit.alternate.reason,"conflicts with HTF Bias")>=0,
+                   "HTF bias rejects both conflicting model opportunities with reasons");
+      funnelContext.htfBias=QSMC_BIAS_BULLISH;funnelContext.sweptSessionLow=false;
+      CQSMCOpportunityFunnel::Build(funnelContext,TimeCurrent(),0.55,funnelRegistry,audit);
+      report.Check(funnelRegistry.Count()==0 &&
+                   StringFind(audit.primary.reason,"liquidity raid")>=0,
+                   "directional session-liquidity filter records rejection reason");
+      funnelContext.sweptSessionLow=true;funnelContext.elliottLastType=QSMC_SWING_LOW;
+      CQSMCOpportunityFunnel::Build(funnelContext,TimeCurrent(),0.55,funnelRegistry,audit);
+      double alignedElliottScore=audit.primary.scorePoints;
+      funnelContext.elliottLastType=QSMC_SWING_HIGH;
+      CQSMCOpportunityFunnel::Build(funnelContext,TimeCurrent(),0.55,funnelRegistry,audit);
+      report.Check(MathAbs(alignedElliottScore-audit.primary.scorePoints-6.0)<0.001,
+                   "Elliott hint adds/removes only a small score and cannot create the setup");
 
       CQSMCSignalRegistry registry;
       registry.Add(QSMC_DIR_BUY,0.7,"test","buy evidence");

@@ -91,7 +91,7 @@ public:
 
       // Never confirm a swing using the still-forming candle when closed-only
       // mode is active: the newest comparison index is `newest`, not zero.
-      for(int i = limit; i >= firstCandidate; i--)
+      for(int i = firstCandidate; i <= limit; i++)
       {
          if(m_count >= QSMC_MAX_STRUCT_POINTS) break;
 
