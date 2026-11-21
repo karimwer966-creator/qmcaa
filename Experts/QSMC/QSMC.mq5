@@ -3,7 +3,7 @@
 //|  QSMC Expert Advisor. Default ANALYSIS mode does not submit orders. |
 //+------------------------------------------------------------------+
 #property copyright "QSMC"
-#property version   "0.90"
+#property version   "000.900"
 #property strict
 #property description "QSMC modular analysis EA. REAL trading is compile-time disabled."
 

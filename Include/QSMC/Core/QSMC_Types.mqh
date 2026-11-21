@@ -176,6 +176,7 @@ struct SQSMCAccountState
    double   freeMargin;
    double   dailyLossPct;      // realised+floating loss today, per cent
    double   peakEquity;        // persisted high-water mark
+   double   drawdownPct;       // decline from the persisted equity peak
    double   exposureLots;      // QSMC-owned exposure
    int      openPositions;     // QSMC-owned positions
    datetime captured;
