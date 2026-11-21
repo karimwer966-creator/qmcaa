@@ -3,7 +3,7 @@
 //|  QSMC Expert Advisor. Default ANALYSIS mode does not submit orders. |
 //+------------------------------------------------------------------+
 #property copyright "QSMC"
-#property version   "000.900"
+#property version   "1.000"
 #property strict
 #property description "QSMC modular analysis EA. REAL trading is compile-time disabled."
 
@@ -39,6 +39,24 @@ input int                 InpZoneTolerancePoints  = 150;
 input int                 InpSvpLookback           = 240;
 input int                 InpSvpBins               = 40;
 input double              InpSvpValueAreaPct       = 70.0;
+input bool                InpSessionsEnabled      = true;
+// Session inputs are broker-server time; adjust for server UTC offset/DST.
+input int                 InpAsiaStartHour        = 2;
+input int                 InpAsiaStartMinute      = 0;
+input int                 InpAsiaEndHour          = 8;
+input int                 InpAsiaEndMinute        = 0;
+input int                 InpLondonStartHour      = 9;
+input int                 InpLondonStartMinute    = 0;
+input int                 InpLondonEndHour        = 12;
+input int                 InpLondonEndMinute      = 0;
+input int                 InpNewYorkStartHour     = 15;
+input int                 InpNewYorkStartMinute   = 0;
+input int                 InpNewYorkEndHour       = 18;
+input int                 InpNewYorkEndMinute     = 0;
+input double              InpMinFvgAtr            = 0.15;
+input int                 InpMaxChartZones        = 5;
+input bool                InpDrawElliottLabels    = true;
+input bool                InpDrawFvgZones         = true;
 input double              InpStopAtrMultiplier     = 1.5;
 input double              InpMinimumRR             = 1.5;
 input double              InpTargetRR              = 2.0;
@@ -93,6 +111,17 @@ void QSMC_BuildConfig(SQSMCConfig &cfg)
    cfg.svp_lookback=InpSvpLookback;
    cfg.svp_bins=InpSvpBins;
    cfg.svp_value_area_pct=InpSvpValueAreaPct;
+   cfg.sessions_enabled=InpSessionsEnabled;
+   cfg.asia_start_minute=InpAsiaStartHour*60+InpAsiaStartMinute;
+   cfg.asia_end_minute=InpAsiaEndHour*60+InpAsiaEndMinute;
+   cfg.london_start_minute=InpLondonStartHour*60+InpLondonStartMinute;
+   cfg.london_end_minute=InpLondonEndHour*60+InpLondonEndMinute;
+   cfg.new_york_start_minute=InpNewYorkStartHour*60+InpNewYorkStartMinute;
+   cfg.new_york_end_minute=InpNewYorkEndHour*60+InpNewYorkEndMinute;
+   cfg.min_fvg_atr=InpMinFvgAtr;
+   cfg.max_chart_zones=InpMaxChartZones;
+   cfg.draw_elliott_labels=InpDrawElliottLabels;
+   cfg.draw_fvg_zones=InpDrawFvgZones;
    cfg.deviation_points=InpDeviationPoints;
    cfg.magic_offset=InpMagicOffset;
    cfg.real_ack=InpRealAcknowledgement;

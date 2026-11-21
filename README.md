@@ -10,7 +10,10 @@ QSMC is a layered MetaTrader 5 Expert Advisor reconstruction. The delivered EA b
 - Validated configuration, preset application before opt-in risk overrides, stable input fingerprint, instance magic identity, and persisted collision check.
 - Server-time clock, bounded logger/diagnostics, key-value state persistence, environment/quote health checks, and an incident/kill-switch latch.
 - Closed-bar three-timeframe snapshots, history/quote validation, readiness gates, and stale-data handling.
-- Transparent heuristic analysis: fractal swings, EMA/HTF/swing bias, supply-demand and clustered S/R zones, zone scoring, simple candle reactions, displacement-confirmed breaks, liquidity levels/sweeps, and an approximate bar-volume profile (POC/VAH/VAL/HVN/LVN).
+- Primary ICT-inspired watch path: completed-session liquidity raid → displacement/MSS through a previously confirmed opposing swing → retest of an unfilled post-MSS FVG. Secondary path: historical BOS/CHoCH proxy → retest of an unmitigated swing/displacement order-block proxy.
+- Both models require matching non-neutral HTF bias, configured London/New York session, and direction-aligned recent session-liquidity raid. Broker-server windows are editable; nearby prior-session levels and relevant OB/FVG zones are charted.
+- Tick-volume proxy, Volume Profile (when ready), and a small heuristic Elliott pivot hint contribute only as confluence points. They are explicitly not real aggressor-side order flow or calibrated probabilities; Elliott rules are not validated.
+- Every closed-bar model decision and final arbiter outcome is appended with accept/wait/reject reasons to `MQL5/Files/QSMC/opportunities_<magic>.csv`; `Tests/oos_evaluate.py` provides a chronological train/test descriptive forward-return report from that export.
 - Auditable candidate funnel and deterministic arbiter. Missing data is not a signal; opposing equal-score candidates reject; all rejections carry codes and reasons.
 - Central execution preflight, risk sizing/account checks, UID duplicate journal, in-memory simulated adapter, read-only position reconciliation, and a hard-disabled real adapter.
 - State-only dashboard and namespaced chart-layer rendering.

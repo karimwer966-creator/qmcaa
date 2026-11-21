@@ -22,6 +22,7 @@
 #include "Infrastructure/QSMC_Logger.mqh"
 #include "Infrastructure/QSMC_StateStore.mqh"
 #include "Infrastructure/QSMC_Stats.mqh"
+#include "Infrastructure/QSMC_OpportunityAudit.mqh"
 #include "Safety/QSMC_Diagnostics.mqh"
 #include "Safety/QSMC_HealthMonitor.mqh"
 #include "Safety/QSMC_IncidentSafety.mqh"
@@ -45,6 +46,12 @@
 #include "Analysis/QSMC_Liquidity.mqh"
 #include "Analysis/QSMC_Reaction.mqh"
 #include "Analysis/QSMC_EarlyBreakDetector.mqh"
+#include "Analysis/QSMC_Sessions.mqh"
+#include "Analysis/QSMC_FairValueGaps.mqh"
+#include "Analysis/QSMC_ICTSetup.mqh"
+#include "Analysis/QSMC_OrderFlowProxy.mqh"
+#include "Analysis/QSMC_ElliottGuide.mqh"
+#include "Analysis/QSMC_BreakOrderBlock.mqh"
 #include "Analysis/QSMC_Scanners.mqh"
 
 // SVP

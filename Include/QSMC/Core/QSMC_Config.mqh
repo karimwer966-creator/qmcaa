@@ -56,6 +56,19 @@ struct SQSMCConfig
    double               min_confidence;     // 0..1
    int                  deviation_points;
 
+   //--- ICT/session analysis (times are broker-server minutes from midnight)
+   bool                 sessions_enabled;
+   int                  asia_start_minute;
+   int                  asia_end_minute;
+   int                  london_start_minute;
+   int                  london_end_minute;
+   int                  new_york_start_minute;
+   int                  new_york_end_minute;
+   double               min_fvg_atr;
+   int                  max_chart_zones;
+   bool                 draw_elliott_labels;
+   bool                 draw_fvg_zones;
+
    long                 magic_offset;
    int                  bars_back;
 
@@ -102,6 +115,20 @@ struct SQSMCConfig
       tp_rr                = 2.0;
       min_confidence       = 0.55;
       deviation_points     = 10;
+
+      // Suggested broker-server windows (editable; not DST-adjusted).
+      // Reconcile these against the broker's displayed server clock.
+      sessions_enabled     = true;
+      asia_start_minute    = 120;  // 02:00
+      asia_end_minute      = 480;  // 08:00
+      london_start_minute  = 540;  // 09:00
+      london_end_minute    = 720;  // 12:00
+      new_york_start_minute= 900;  // 15:00
+      new_york_end_minute  = 1080; // 18:00
+      min_fvg_atr          = 0.15;
+      max_chart_zones      = 5;
+      draw_elliott_labels  = true;
+      draw_fvg_zones       = true;
 
       magic_offset         = 0;
       bars_back            = 600;
@@ -175,7 +202,8 @@ struct SQSMCConfig
       if(!MathIsValidNumber(risk_percent) || !MathIsValidNumber(max_daily_loss_pct) ||
          !MathIsValidNumber(max_total_exposure_lots) || !MathIsValidNumber(max_drawdown_pct) ||
          !MathIsValidNumber(svp_value_area_pct) || !MathIsValidNumber(sl_atr_mult) ||
-         !MathIsValidNumber(min_rr) || !MathIsValidNumber(tp_rr) || !MathIsValidNumber(min_confidence))
+         !MathIsValidNumber(min_rr) || !MathIsValidNumber(tp_rr) ||
+         !MathIsValidNumber(min_confidence) || !MathIsValidNumber(min_fvg_atr))
       { err = "configuration contains a non-finite numeric value"; return false; }
 
       //--- risk (hard caps, never bypassed) ---------------------------
@@ -224,6 +252,19 @@ struct SQSMCConfig
 
       if(deviation_points < 0 || deviation_points > 1000)
       { err = "deviation_points outside [0,1000]"; return false; }
+
+      if(asia_start_minute<0 || asia_start_minute>=1440 || asia_end_minute<0 || asia_end_minute>=1440 ||
+         london_start_minute<0 || london_start_minute>=1440 || london_end_minute<0 || london_end_minute>=1440 ||
+         new_york_start_minute<0 || new_york_start_minute>=1440 ||
+         new_york_end_minute<0 || new_york_end_minute>=1440)
+      { err = "session times must be minute-of-day values in [0,1439]"; return false; }
+      if(sessions_enabled && (asia_start_minute==asia_end_minute ||
+         london_start_minute==london_end_minute || new_york_start_minute==new_york_end_minute))
+      { err = "enabled session start/end times must differ"; return false; }
+      if(min_fvg_atr<0.0 || min_fvg_atr>2.0)
+      { err = "min_fvg_atr outside [0,2]"; return false; }
+      if(max_chart_zones<0 || max_chart_zones>20)
+      { err = "max_chart_zones outside [0,20]"; return false; }
 
       //--- magic ------------------------------------------------------
       if(magic_offset < 0 || magic_offset >= QSMC_MAGIC_RANGE)

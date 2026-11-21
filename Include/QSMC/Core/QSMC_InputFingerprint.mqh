@@ -135,6 +135,18 @@ public:
       AddDouble("min_conf",    c.min_confidence, 4);
       AddInt("deviation",      c.deviation_points);
 
+      AddBool("sessions_enabled",c.sessions_enabled);
+      AddInt("asia_start",c.asia_start_minute);
+      AddInt("asia_end",c.asia_end_minute);
+      AddInt("london_start",c.london_start_minute);
+      AddInt("london_end",c.london_end_minute);
+      AddInt("ny_start",c.new_york_start_minute);
+      AddInt("ny_end",c.new_york_end_minute);
+      AddDouble("min_fvg_atr",c.min_fvg_atr,4);
+      AddInt("max_chart_zones",c.max_chart_zones);
+      AddBool("draw_elliott",c.draw_elliott_labels);
+      AddBool("draw_fvg",c.draw_fvg_zones);
+
       AddInt("magic_offset",   c.magic_offset);
    }
 
