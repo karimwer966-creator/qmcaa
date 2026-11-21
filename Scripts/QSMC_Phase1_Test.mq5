@@ -1,5 +1,5 @@
 #property script_show_inputs
-#include <QSMC/QSMC_Root.mqh>
+#include <QSMC/QSMC.mqh>
 
 input ENUM_QSMC_PRESET InpPreset = QSMC_PRESET_BALANCED;
 
@@ -10,10 +10,12 @@ void OnStart()
    QSMC_ApplyPreset(cfg, InpPreset);
 
    SQSMCResult res;
-   if(!QSMC_Root().Init(cfg, res))
+   CQSMCRoot root;
+   if(!root.Init(cfg, res))
    {
-      PrintFormat("QSMC init failed: %s", res.message);
+      PrintFormat("QSMC init failed [%d]: %s", (int)res.code, res.message);
       return;
    }
-   Print(QSMC_Root().Summary());
+   Print(root.Summary());
+   root.Shutdown();
 }
