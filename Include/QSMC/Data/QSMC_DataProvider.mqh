@@ -71,11 +71,11 @@ public:
          }
 
          m_lastError = GetLastError();
-         if(m_lastError != ERR_HISTORY_WILL_UPDATED &&
-            m_lastError != ERR_NO_HISTORY_DATA && m_lastError != ERR_HISTORY_TIMEOUT)
-            break;
-
-         Sleep(50 * (attempt + 1));
+         // CopyRates may transiently return zero while the terminal builds
+         // history. Retry a small, fixed number of times; do not depend on
+         // platform-specific error identifiers that vary between builds.
+         if(attempt + 1 < attempts)
+            Sleep(50 * (attempt + 1));
       }
       return false;
    }
