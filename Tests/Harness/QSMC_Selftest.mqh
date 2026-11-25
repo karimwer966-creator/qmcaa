@@ -48,6 +48,67 @@ public:
    {
       report.Reset();
       string why;
+      report.Check(CQSMCEntryTimeRules::FromHourMinute(8,90)==-1 &&
+                   CQSMCEntryTimeRules::FromHourMinute(23,59)==1439,"session components validated before conversion");
+      report.Check(CQSMCEntryTimeRules::Window(30,1380,60) &&
+                   !CQSMCEntryTimeRules::Window(60,1380,60),"entry-session midnight wrap and exclusive end");
+      report.Check(!CQSMCEntryTimeRules::Schedule(1,1425,1200,false,0,0,0,0,0,0,why) &&
+                   CQSMCEntryTimeRules::Schedule(1,75,1200,false,0,0,0,0,0,0,why),"rollover blocks exact start, permits exact end");
+      report.Check(!CQSMCEntryTimeRules::Schedule(5,1200,1200,false,0,0,0,0,0,0,why),"Friday cutoff blocks exact boundary");
+      report.Check(!CQSMCEntryTimeRules::Schedule(0,600,1200,false,0,0,0,0,0,0,why),"weekend blocks new entries");
+      report.Check(CQSMCNewsPolicy::Blackout(100000,101800) &&
+                   !CQSMCNewsPolicy::Blackout(100000,101801),"news pre-window boundary is inclusive");
+      report.Check(CQSMCNewsPolicy::Blackout(100000,98200) &&
+                   !CQSMCNewsPolicy::Blackout(100000,98199),"news post-window boundary is inclusive");
+      report.Check(CQSMCNewsPolicy::Covered(98200,102700,100000,100899) &&
+                   !CQSMCNewsPolicy::Covered(98200,102700,100000,100900),"news cache expires exactly at 15 minutes");
+      string newsWords;
+      bool validWords=CQSMCNewsPolicy::Keywords(" cpi ; FOMC;Fed ",newsWords);
+      report.Check(validWords && CQSMCNewsPolicy::Relevant("USD",false,"fed chair speaks",newsWords) &&
+                   !CQSMCNewsPolicy::Relevant("EUR",true,"CPI",newsWords),"news keyword matching is USD-scoped and case-insensitive");
+      report.Check(!CQSMCNewsPolicy::Keywords("CPI;;FOMC",newsWords),"empty news keyword rejected");
+      report.Check(!CQSMCExecutionGates::ReleaseApproved(),"release interlock stays closed");
+      report.Check(!CQSMCExecutionGates::Policy(false,true,true,ACCOUNT_TRADE_MODE_DEMO,
+                   ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,QSMC_REAL_ACK_TOKEN,why),"Gate 1 mandatory");
+      report.Check(!CQSMCExecutionGates::Policy(true,false,false,ACCOUNT_TRADE_MODE_REAL,
+                   ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,QSMC_REAL_ACK_TOKEN,why),"Gate 2 blocks live");
+      report.Check(!CQSMCExecutionGates::Policy(true,true,false,ACCOUNT_TRADE_MODE_REAL,
+                   ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,"wrong",why),"Gate 3 exact ack mandatory");
+      report.Check(!CQSMCExecutionGates::Policy(true,true,true,ACCOUNT_TRADE_MODE_DEMO,
+                   ACCOUNT_MARGIN_MODE_RETAIL_NETTING,QSMC_REAL_ACK_TOKEN,why),"netting always refused");
+      report.Check(CQSMCExecutionGates::Policy(true,false,false,ACCOUNT_TRADE_MODE_DEMO,
+                   ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,QSMC_REAL_ACK_TOKEN,why),"demo policy eligible, not armed");
+      report.Check(CQSMCBrokerRules::Classify(TRADE_RETCODE_DONE_PARTIAL)==QSMC_BROKER_PARTIAL,
+                   "partial fill distinct from full fill");
+      report.Check(CQSMCBrokerRules::Classify(TRADE_RETCODE_TIMEOUT)==QSMC_BROKER_UNCERTAIN,
+                   "timeout never blindly retried");
+      report.Check(CQSMCBrokerRules::Classify(0)==QSMC_BROKER_UNCERTAIN,"unknown response fail closed");
+      ENUM_ORDER_TYPE_FILLING filling=ORDER_FILLING_FOK;
+      report.Check(!CQSMCBrokerRules::Filling(0,SYMBOL_TRADE_EXECUTION_MARKET,filling,why),
+                   "market execution cannot use RETURN fallback");
+      report.Check(CQSMCBrokerRules::Filling((long)SYMBOL_FILLING_IOC,
+                   SYMBOL_TRADE_EXECUTION_MARKET,filling,why) && filling==ORDER_FILLING_IOC,
+                   "runtime IOC flag respected");
+      report.Check(CQSMCBrokerRules::OnTickGrid(2000.25,0.25) &&
+                   !CQSMCBrokerRules::OnTickGrid(2000.26,0.25),"non-decimal tick grid checked");
+      report.Check(CQSMCBrokerRules::Stops(QSMC_DIR_BUY,2000,2001,1998,2004,2,why),
+                   "BUY stop distance uses fresh Bid");
+      report.Check(!CQSMCBrokerRules::Stops(QSMC_DIR_SELL,2000,2001,2002,1998,2,why),
+                   "SELL SL checked against fresh Ask");
+      double riskBudget=0.0,riskLots=0.0;
+      report.Check(CQSMCRiskMath::Budget(10000,0.5,riskBudget) && riskBudget==50,
+                   "risk budget uses supplied equity");
+      report.Check(CQSMCRiskMath::FloorLots(50,100,0.25,10,0.25,10,riskLots) && riskLots==0.5,
+                   "quarter-lot step floors without decimal assumptions");
+      report.Check(!CQSMCRiskMath::FloorLots(24,100,0.25,10,0.25,10,riskLots) && riskLots==0,
+                   "minimum lot above budget is rejected, never raised");
+      report.Check(CQSMCRiskMath::FloorLots(1000,100,0.25,1.1,0.25,0.9,riskLots) && riskLots==0.75,
+                   "caps are re-floored to volume step");
+      report.Check(CQSMCRiskMath::Margin(10000,1200,200,50) &&
+                   !CQSMCRiskMath::Margin(10000,1199,200,50),"ten-percent equity margin reserve boundary");
+      report.Check(!CQSMCRiskMath::Margin(10000,2199,200,2000),"stop risk dominates margin reserve");
+      CQSMCRealAdapter blockedBroker;
+      report.Check(!blockedBroker.Arm(QSMC_REAL_ACK_TOKEN),"unconfigured broker cannot arm");
       SQSMCConfig invalidCfg;invalidCfg.SetDefaults();invalidCfg.timer_ms=1;
       bool validCfg=invalidCfg.Validate(why);
       report.Check(!validCfg && StringFind(why,"timer_ms")>=0,
@@ -74,7 +135,7 @@ public:
       CQSMCInstanceIdentity id1,id2;
       report.Check(id1.Build(_Symbol,PERIOD_M15,fp1.Hex(),0),"identity builds for first fingerprint");
       report.Check(id2.Build(_Symbol,PERIOD_M15,fp3.Hex(),0),"identity builds for changed fingerprint");
-      report.Check(id1.Magic()!=id2.Magic(),"different fingerprints produce different identity in fixture");
+      report.Check(id1.Magic()==id2.Magic() && id1.Scope()==id2.Scope(),"configuration drift preserves stable owner magic");
 
       string tfError;
       report.Check(CQSMCTimeframeManager::ValidateOrdering(PERIOD_H4,PERIOD_M15,PERIOD_M5,tfError),
@@ -261,21 +322,41 @@ public:
       if(storeReady)
       {
          CQSMCExecutionJournal journal;
-         journal.MarkSubmitted(1122334455,testStore);
+         report.Check(journal.MarkSubmitted(1122334455,testStore),"UID guard writes/save report success");
          report.Check(journal.Seen(1122334455,testStore),"persisted intent UID blocks duplicate replay");
          report.Check(!journal.Seen(5566778899,testStore),"different intent UID remains eligible");
 
          CQSMCIncidentSafety incident,restored;
-         incident.Latch(testStore,"self-test safety latch",true);
+         report.Check(incident.Latch(testStore,"self-test safety latch",true),"incident latch reports persistence result");
          bool recovered=restored.Restore(testStore);
-         report.Check(!recovered && restored.RecoveryUncertain(),"uncertain restart remains safety-latched");
+         report.Check(!recovered && restored.IsLatched() && restored.RecoveryUncertain(),
+                      "uncertain restart remains safety-latched");
+         CQSMCStateStore reloaded;
+         bool loaded=reloaded.Init(testMagic,true);
+         CQSMCIncidentSafety diskRestored;
+         report.Check(loaded && !diskRestored.Restore(reloaded) && diskRestored.RecoveryUncertain(),
+                      "fresh store reload restores persisted uncertain flag");
+         testStore.SetString("execution.pending_uid","1122334455");
+         report.Check(!restored.Acknowledge(testStore,true) && restored.IsLatched(),
+                      "operator acknowledgement cannot clear unresolved broker intent");
+         testStore.Remove("execution.pending_uid");
+         report.Check(restored.Acknowledge(testStore,true) && !restored.IsLatched(),
+                      "explicit acknowledgement clears only after successful writes");
+         report.Check(!testStore.SetString("safety.kill","invalid"),
+                      "typed schema rejects malformed/wrong-type safety writes");
+         CQSMCStateStore duplicate;
+         report.Check(!duplicate.Init(testMagic),"second exclusive writer claim refused");
+         duplicate.Close();
          testStore.SetBool("safety.kill",false);
          testStore.SetBool("safety.uncertain",false);
          testStore.SetKillSwitch(false);
          testStore.Save();
          GlobalVariableDel(testStore.KillGvName());
-         FileDelete(testStore.FileName());
-         FileDelete(testStore.FileName()+".tmp");
+         string prefix=testStore.FileName();
+         reloaded.Close();testStore.Close();
+         FileDelete(prefix+".a.state",FILE_COMMON);
+         FileDelete(prefix+".b.state",FILE_COMMON);
+         FileDelete(prefix+".tmp",FILE_COMMON);
       }
 
       ENUM_QSMC_PRESET preset;

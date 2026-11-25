@@ -111,25 +111,19 @@ public:
                               != SYMBOL_TRADE_MODE_DISABLED);
 
       //--- quotes -----------------------------------------------------
-      datetime quoteTime = (datetime)SymbolInfoInteger(m_symbol, SYMBOL_TIME);
-      if(quoteTime > 0)
-         m_quoteAgeSeconds = (int)(m_checked - quoteTime);
-      else
-         m_quoteAgeSeconds = 999999;
-
-      m_quotesFresh = (quoteTime > 0 && m_quoteAgeSeconds <= m_staleSeconds);
-
-      if(point > 0.0)
-      {
-         double ask = SymbolInfoDouble(m_symbol, SYMBOL_ASK);
-         double bid = SymbolInfoDouble(m_symbol, SYMBOL_BID);
-         if(ask > 0.0 && bid > 0.0 && ask >= bid)
-            m_spreadPoints = (long)MathRound((ask - bid) / point);
-         else
-            m_spreadPoints = (long)SymbolInfoInteger(m_symbol, SYMBOL_SPREAD);
-      }
-
-      m_spreadOk = (m_maxSpreadPoints <= 0 || m_spreadPoints <= m_maxSpreadPoints);
+      MqlTick tick;ZeroMemory(tick);
+      bool validTick=SymbolInfoTick(m_symbol,tick) && MathIsValidNumber(point) && point>0.0 &&
+                     MathIsValidNumber(tick.ask) && MathIsValidNumber(tick.bid) &&
+                     tick.bid>0.0 && tick.ask>=tick.bid;
+      datetime now=TimeTradeServer();
+      long age=(long)now-(long)tick.time;
+      m_quoteAgeSeconds=(int)MathMin(999999,MathMax(0,age));
+      m_quotesFresh=(validTick && now>0 && tick.time>0 && age>=0 && age<=m_staleSeconds);
+      double spread=(validTick?(tick.ask-tick.bid)/point:-1.0);
+      m_spreadOk=(MathIsValidNumber(spread) && spread>=0.0 &&
+                  m_maxSpreadPoints>0 && spread<=(double)m_maxSpreadPoints);
+      if(MathIsValidNumber(spread) && spread>=0.0 && spread<2147483647.0)
+         m_spreadPoints=(long)MathCeil(spread);
 
       //--- classification --------------------------------------------
       if(!m_connected)

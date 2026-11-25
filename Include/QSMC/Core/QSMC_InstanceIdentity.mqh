@@ -1,11 +1,6 @@
 //+------------------------------------------------------------------+
 //|                                        QSMC_InstanceIdentity.mqh |
-//|  Per-instance identity.  The magic number is derived from         |
-//|  account + chart + symbol + period + configuration fingerprint,   |
-//|  so two differently configured instances can never share an       |
-//|  order magic silently.  Collision can still occur through the     |
-//|  1e6 modulo space; that is detected at claim time by the App      |
-//|  layer (see QSMC_Bootstrap) and treated as a hard error.          |
+//| Stable operator magic; configuration/chart/version are diagnostics. |
 //+------------------------------------------------------------------+
 #ifndef QSMC_INSTANCEIDENTITY_MQH
 #define QSMC_INSTANCEIDENTITY_MQH
@@ -13,6 +8,7 @@
 #include "QSMC_Constants.mqh"
 #include "QSMC_Version.mqh"
 #include "QSMC_InputFingerprint.mqh"
+#include "QSMC_OwnerScope.mqh"
 
 class CQSMCInstanceIdentity
 {
@@ -24,6 +20,7 @@ private:
    ulong           m_magic;
    string          m_id;
    string          m_fingerprint;
+   string          m_scope;
    datetime        m_started;
    bool            m_built;
 
@@ -41,15 +38,14 @@ public:
       m_built       = false;
    }
 
-   //+---------------------------------------------------------------+
-   //| Build identity.  magic_offset is clamped by config validation;  |
-   //| it only perturbs the final magic inside the reserved band.      |
-   //+---------------------------------------------------------------+
+   // magicOffset retained only for callers; it no longer changes ownership.
    bool Build(const string symbol,
               const ENUM_TIMEFRAMES period,
               const string fingerprintHex,
-              const long magicOffset)
+              const long magicOffset,
+              const ulong explicitMagic=53000001)
    {
+      m_built=false;m_magic=0;m_scope="";m_id="";
       if(StringLen(symbol) == 0 || StringLen(fingerprintHex) == 0)
          return false;
       if(magicOffset < 0 || magicOffset >= QSMC_MAGIC_RANGE)
@@ -62,17 +58,9 @@ public:
       m_started     = TimeCurrent();
       m_fingerprint = fingerprintHex;
 
-      ulong h = QSMC_HashString("v" + QSMC_VersionTag());
-      h = QSMC_HashString(symbol, h);
-      h = QSMC_HashString(IntegerToString((long)period), h);
-      h = QSMC_HashString(IntegerToString(m_account), h);
-      h = QSMC_HashString(IntegerToString(m_chartId), h);
-      h = QSMC_HashString(fingerprintHex, h);
-
-      ulong span = (ulong)QSMC_MAGIC_RANGE - (ulong)magicOffset;
-      m_magic = (ulong)QSMC_MAGIC_BASE + (ulong)magicOffset + (h % span);
-      if(m_magic >= (ulong)(QSMC_MAGIC_BASE + QSMC_MAGIC_RANGE))
-         m_magic = (ulong)QSMC_MAGIC_BASE + (h % (ulong)QSMC_MAGIC_RANGE);
+      m_scope=CQSMCOwnerScope::Raw(m_account,AccountInfoString(ACCOUNT_SERVER),symbol,explicitMagic);
+      if(StringLen(m_scope)==0)return false;
+      m_magic=explicitMagic;
 
       m_id = StringFormat("%s-%s-%s-%s", QSMC_NAME, symbol,
                           QSMC_TfToString(period), IntegerToString((long)m_magic));
@@ -85,8 +73,10 @@ public:
       m_built = false;
       m_magic = 0;
       m_id    = "";
+      m_scope = "";
    }
 
+   string Scope() const{return m_scope;}
    bool   IsBuilt()      const { return m_built; }
    string Id()           const { return m_id; }
    string Symbol()       const { return m_symbol; }
@@ -100,12 +90,12 @@ public:
    //--- persistent key namespace for this instance (state store / files)
    string StorePrefix() const
    {
-      return "state_" + IntegerToString((long)m_magic) + "_";
+      return "v2_"+QSMC_UlongToHex(QSMC_HashString(m_scope))+"_";
    }
 
    string GvKey(const string name) const
    {
-      return QSMC_GV_PREFIX + IntegerToString((long)m_magic) + "_" + name;
+      return QSMC_GV_PREFIX+"V2_"+QSMC_UlongToHex(QSMC_HashString(m_scope))+"_"+name;
    }
 
    string ObjName(const string name) const

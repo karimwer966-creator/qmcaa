@@ -73,6 +73,7 @@
 #include "Execution/QSMC_ExecutionAdapter.mqh"
 #include "Execution/QSMC_DemoAdapter.mqh"
 #include "Execution/QSMC_RealAdapter.mqh"
+#include "Execution/QSMC_TradeReconciler.mqh"
 #include "Execution/QSMC_ExecutionJournal.mqh"
 #include "Execution/QSMC_RiskManager.mqh"
 #include "Execution/QSMC_ExecutionPreflight.mqh"

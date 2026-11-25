@@ -70,7 +70,7 @@ public:
       m_fingerprint.AddConfig(m_cfg);
 
       if(!m_identity.Build(m_cfg.symbol, m_cfg.exec_tf, m_fingerprint.Hex(),
-                           m_cfg.magic_offset))
+                           m_cfg.magic_offset,m_cfg.owner_magic))
       {
          res.Set(QSMC_ERR_MODULE_INIT, "identity build failed");
          m_fsm.Transition(QSMC_STATE_FAILED, err);
@@ -104,12 +104,17 @@ public:
       string err;
 
       // A live instance must never start with the emergency brake engaged.
-      if(m_cfg.mode == QSMC_MODE_REAL && QSMC_ALLOW_REAL != 1)
+      if(m_cfg.mode == QSMC_MODE_REAL)
       {
-         m_safeReason = "REAL mode refused by build gate";
-         m_fsm.Transition(QSMC_STATE_SAFE_MODE, err);
-         res.Set(QSMC_ERR_EXECUTION_DISABLED, m_safeReason);
-         return false;
+         bool permitted=CQSMCExecutionGates::EnvironmentPermits(m_cfg.real_ack,err);
+         if(permitted && !CQSMCExecutionGates::ReleaseApproved())
+         {permitted=false;err=CQSMCExecutionGates::ReleaseReason();}
+         if(!permitted)
+         {
+            m_safeReason=err;
+            res.Set(QSMC_ERR_EXECUTION_DISABLED,m_safeReason);
+            return false; // READY remains non-operational; no illegal READY->SAFE_MODE.
+         }
       }
 
       if(!m_fsm.Transition(QSMC_STATE_RUNNING, err))
@@ -187,6 +192,7 @@ public:
    bool  IsHealthy()             const { return m_fsm.IsHealthy(); }
    bool  IsInitialised()         const { return m_initialised; }
    string SafeModeReason()       const { return m_safeReason; }
+   string OwnerScope() const{return m_identity.Scope();}
    ulong Magic()                 const { return m_identity.Magic(); }
    string InstanceId()           const { return m_identity.Id(); }
    string FingerprintHex()       const { return m_fingerprint.Hex(); }

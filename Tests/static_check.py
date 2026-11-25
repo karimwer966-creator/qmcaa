@@ -126,9 +126,31 @@ def main() -> int:
             if depth:
                 errors.append(f"unbalanced {opening}{closing} in {path.relative_to(ROOT)}")
 
-        # Live submission API is intentionally absent from this codebase.
-        if re.search(r"\bOrderSend\s*\(", clean) or re.search(r"\bCTrade\b", clean):
-            errors.append(f"live trade API reference: {path.relative_to(ROOT)}")
+        # Broker calls are confined to one explicit, compile-gated boundary.
+        # Source-shape checks are regression guards, not proof of runtime safety.
+        broker = ROOT / "Include/QSMC/Execution/QSMC_RealAdapter.mqh"
+        if re.search(r"\bCTrade\b|\bOrderSendAsync\s*\(", clean):
+            errors.append(f"forbidden alternate trade API: {path.relative_to(ROOT)}")
+        calls = list(re.finditer(r"\b(?:OrderSend|OrderCheck)\s*\(", clean))
+        if calls and path != broker:
+            errors.append(f"trade API outside broker boundary: {path.relative_to(ROOT)}")
+        for call in calls:
+            stack: list[str] = []
+            for line in clean[:call.start()].splitlines():
+                directive = re.match(r"\s*#(ifdef|ifndef|if|else|elif|endif)\b(.*)", line)
+                if not directive:
+                    continue
+                kind, value = directive.groups()
+                if kind in ("ifdef", "ifndef", "if"):
+                    stack.append(value.strip() if kind == "ifdef" else "other")
+                elif kind in ("else", "elif") and stack:
+                    stack[-1] = "other"
+                elif kind == "endif" and stack:
+                    stack.pop()
+            if "QSMC_ENABLE_REAL_TRADING" not in stack:
+                errors.append(f"unguarded broker API: {path.relative_to(ROOT)}")
+        if re.search(r"^\s*#define\s+(QSMC_ENABLE_REAL_TRADING|QSMC_ALLOW_LIVE_ACCOUNT)\b", clean, re.M):
+            errors.append(f"trading switch enabled in shipped source: {path.relative_to(ROOT)}")
 
     print(f"QSMC static structure check: {len(files)} source files inspected")
     if errors:
