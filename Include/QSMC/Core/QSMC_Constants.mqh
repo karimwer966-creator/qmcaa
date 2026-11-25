@@ -50,19 +50,17 @@
 #define QSMC_MAX_RR                  10.0
 #define QSMC_MIN_RR_FLOOR             1.0
 
-//--- compile-time gate for live trading.
-//    QSMC_ALLOW_REAL must stay 0 until Safety + Preflight + Risk are
-//    implemented, tested, documented and explicitly approved.  Nothing in
-//    the code base may flip this at runtime.
+//--- deprecated compatibility macro; grants NO execution authority.
+//    Broker policy now lives in QSMC_ExecutionGates.mqh. Even defining this
+//    legacy macro to 1 cannot enable Gate 1, Gate 2, arming or the release interlock.
 #ifndef QSMC_ALLOW_REAL
 #define QSMC_ALLOW_REAL              0
 #endif
 
-//--- acknowledgement token required (together with QSMC_ALLOW_REAL==1)
-//    before a REAL configuration may even be constructed.
+//--- exact runtime acknowledgement; never sufficient to enable execution alone.
 #define QSMC_REAL_ACK_TOKEN          "I-ACCEPT-LIVE-TRADING-RISK"
 
 //--- version of the persisted state format (bumped on incompatible changes)
-#define QSMC_STATE_FORMAT_VERSION    1
+#define QSMC_STATE_FORMAT_VERSION    2
 
 #endif // QSMC_CONSTANTS_MQH

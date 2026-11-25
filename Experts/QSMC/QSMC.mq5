@@ -62,11 +62,22 @@ input double              InpMinimumRR             = 1.5;
 input double              InpTargetRR              = 2.0;
 input double              InpMinimumConfidence     = 0.55;
 input int                 InpDeviationPoints       = 10;
+// Entry-only guards: server time; news cannot be silently disabled.
+input int                 InpFridayCutoffHour      = 20;
+input int                 InpFridayCutoffMinute    = 0;
+input string              InpTesterNewsCsv         = "";
+input string              InpNewsKeywords          = "NFP;NONFARM;NON-FARM;PAYROLL;CPI;CONSUMER PRICE;FOMC;FED;INTEREST RATE;PCE;PERSONAL CONSUMPTION;GDP;GROSS DOMESTIC PRODUCT;EMPLOYMENT";
+input ulong               InpOwnerMagic            = 53000001;
 input long                InpMagicOffset           = 0;
 input string              InpRealAcknowledgement  = "";
 
 CQSMCOrchestrator g_qsmc;
 bool g_qsmcStarted=false;
+
+int QSMC_ServerMinute(const int hour,const int minute)
+{
+   return CQSMCEntryTimeRules::FromHourMinute(hour,minute);
+}
 
 void QSMC_BuildConfig(SQSMCConfig &cfg)
 {
@@ -112,17 +123,21 @@ void QSMC_BuildConfig(SQSMCConfig &cfg)
    cfg.svp_bins=InpSvpBins;
    cfg.svp_value_area_pct=InpSvpValueAreaPct;
    cfg.sessions_enabled=InpSessionsEnabled;
-   cfg.asia_start_minute=InpAsiaStartHour*60+InpAsiaStartMinute;
-   cfg.asia_end_minute=InpAsiaEndHour*60+InpAsiaEndMinute;
-   cfg.london_start_minute=InpLondonStartHour*60+InpLondonStartMinute;
-   cfg.london_end_minute=InpLondonEndHour*60+InpLondonEndMinute;
-   cfg.new_york_start_minute=InpNewYorkStartHour*60+InpNewYorkStartMinute;
-   cfg.new_york_end_minute=InpNewYorkEndHour*60+InpNewYorkEndMinute;
+   cfg.asia_start_minute=QSMC_ServerMinute(InpAsiaStartHour,InpAsiaStartMinute);
+   cfg.asia_end_minute=QSMC_ServerMinute(InpAsiaEndHour,InpAsiaEndMinute);
+   cfg.london_start_minute=QSMC_ServerMinute(InpLondonStartHour,InpLondonStartMinute);
+   cfg.london_end_minute=QSMC_ServerMinute(InpLondonEndHour,InpLondonEndMinute);
+   cfg.new_york_start_minute=QSMC_ServerMinute(InpNewYorkStartHour,InpNewYorkStartMinute);
+   cfg.new_york_end_minute=QSMC_ServerMinute(InpNewYorkEndHour,InpNewYorkEndMinute);
    cfg.min_fvg_atr=InpMinFvgAtr;
    cfg.max_chart_zones=InpMaxChartZones;
    cfg.draw_elliott_labels=InpDrawElliottLabels;
    cfg.draw_fvg_zones=InpDrawFvgZones;
    cfg.deviation_points=InpDeviationPoints;
+   cfg.friday_cutoff_minute=QSMC_ServerMinute(InpFridayCutoffHour,InpFridayCutoffMinute);
+   cfg.news_keywords=InpNewsKeywords;
+   cfg.tester_news_csv=InpTesterNewsCsv;
+   cfg.owner_magic=InpOwnerMagic;
    cfg.magic_offset=InpMagicOffset;
    cfg.real_ack=InpRealAcknowledgement;
 }
@@ -149,7 +164,8 @@ int OnInit()
 
 void OnDeinit(const int reason)
 {
-   if(g_qsmcStarted)g_qsmc.Deinit(reason);
+   // MT5 also calls OnDeinit(REASON_INITFAILED); partial Init owns resources.
+   g_qsmc.Deinit(reason);
    g_qsmcStarted=false;
 }
 

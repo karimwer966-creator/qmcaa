@@ -15,6 +15,7 @@ struct SQSMCJournalEntry
    ulong uid;
    ENUM_QSMC_RESULT code;
    string symbol;
+   ulong magic;
    string reason;
    string result;
 };
@@ -31,7 +32,11 @@ public:
    {
       int i=m_next;
       m_entries[i].time=TimeCurrent();m_entries[i].uid=intent.uid;m_entries[i].code=code;
-      m_entries[i].symbol=intent.symbol;m_entries[i].reason=reason;m_entries[i].result=result;
+      m_entries[i].symbol=intent.symbol;m_entries[i].magic=intent.magic;
+      m_entries[i].reason=reason;m_entries[i].result=result;
+      PrintFormat("QSMC EXEC %s symbol=%s magic=%I64u intent=%I64u code=%d reason=%s result=%s",
+                  TimeToString(m_entries[i].time,TIME_DATE|TIME_SECONDS),intent.symbol,
+                  intent.magic,intent.uid,(int)code,reason,result);
       m_next=(m_next+1)%QSMC_MAX_JOURNAL;
       if(m_count<QSMC_MAX_JOURNAL)m_count++;
    }
@@ -49,17 +54,20 @@ public:
       }
       return false;
    }
-   void MarkSubmitted(const ulong uid,CQSMCStateStore &store)
+   // QSMC-003: report EVERY mutation failure; caller can batch a single Save.
+   // This does not fix StateStore's replacement/durability contract (Phase 6).
+   bool MarkSubmitted(const ulong uid,CQSMCStateStore &store,const bool saveNow=true)
    {
+      if(uid==0 || !store.IsReady())return false;
       for(int i=15;i>0;i--)
       {
          string older=store.GetString("execution.uid."+IntegerToString(i-1),"");
-         store.SetString("execution.uid."+IntegerToString(i),older);
+         if(!store.SetString("execution.uid."+IntegerToString(i),older))return false;
       }
       string value=StringFormat("%I64u",uid);
-      store.SetString("execution.uid.0",value);
-      store.SetString("execution.last_uid",value);
-      store.Save();
+      if(!store.SetString("execution.uid.0",value) ||
+         !store.SetString("execution.last_uid",value))return false;
+      return (!saveNow || store.Save());
    }
    int Count() const{return m_count;}
    bool GetNewest(const int index,SQSMCJournalEntry &out) const

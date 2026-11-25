@@ -62,6 +62,7 @@ private:
    string m_lastError;
    bool m_initialised;
    bool m_haveSnapshot;
+   bool m_evaluationPending;
    bool m_lastDecisionValid;
    datetime m_lastDecisionBar;
    int m_analysisCount;
@@ -105,6 +106,8 @@ private:
    bool RefreshAndEvaluate(const bool allowStart)
    {
       if(m_cfg.mode==QSMC_MODE_OFF) return false;
+      // A failed refresh/scan must be retried even within the same candle.
+      m_evaluationPending=true;
       SQSMCResult res;
       if(!m_market.Refresh(res))
       {
@@ -154,8 +157,8 @@ private:
       // New-bar discipline uses closed execution candles only.
       datetime bar=snap.BarTime(QSMC_SNAP_EXEC,snap.NewestIndex());
       if(bar<=0){m_dataText="closed bar unavailable";return false;}
-      if(bar==m_lastDecisionBar)return true;
-      m_lastDecisionBar=bar;
+      if(bar==m_lastDecisionBar)
+      {m_evaluationPending=false;return true;}
 
       // Build volume profile before the scanner so it can contribute as an
       // optional, explicitly auditable confluence factor on this same bar.
@@ -171,6 +174,9 @@ private:
          m_diagnostics.Warn("ANALYSIS",scanWhy);return true;
       }
 
+      // Commit the bar only after analysis succeeds, not before a fallible scan.
+      m_lastDecisionBar=bar;
+      m_evaluationPending=false;
       SQSMCScanContext context;
       m_scanners.ContextCopy(context);
       m_renderer.ClearLayers();
@@ -308,7 +314,7 @@ private:
       d.orderFlow=context.orderFlowSummary;
       d.elliott=context.elliottSummary;
       d.decision=m_decisionText;
-      d.safety=m_safety.Reason();
+      d.safety=m_safety.Reason()+" | entry: "+m_safety.EntryFilterDescription();
       d.execution=m_execution.Describe();
       d.diagnostics=m_diagnostics.Last();
       m_renderer.Render(d);
@@ -330,6 +336,7 @@ public:
    CQSMCOrchestrator()
    {
       m_provider=NULL;m_initialised=false;m_haveSnapshot=false;m_lastDecisionValid=false;
+      m_evaluationPending=false;
       m_lastDecisionBar=0;m_analysisCount=0;m_healthText="unknown";m_dataText="initializing";
       m_analysisText="";m_decisionText="NO TRADE";m_opportunityText="";m_lastError="";
       m_decision.Reset();
@@ -362,6 +369,7 @@ public:
       if(!m_execution.Init(cfg,m_root.Magic()))
       {result.Set(QSMC_ERR_MODULE_INIT,"execution manager initialization failed");m_root.Fail(result.message);return false;}
       m_renderer.Init(ChartID(),m_root.InstanceId(),cfg.enable_dashboard,cfg.enable_chart_layers);
+      Print("QSMC ENTRY: filters evaluated at submission or explicit probe only; analytical signals are NOT entry permission");
 
       // Attempt initial history load. Data may still be downloading; timer
       // retries without entering operational state until readiness succeeds.
@@ -396,23 +404,39 @@ public:
    {
       if(!m_initialised || !m_events.Timer())return;
       m_stats.timerTicks++;
-      m_clock.Update();UpdateHealth();
+      m_clock.Update();m_safety.ObserveEntryClock();UpdateHealth();
+      if(m_root.CanOperate())
+      {
+         string riskWhy;
+         if(!m_execution.MonitorRisk(m_cfg,m_safety,m_store,riskWhy))
+         {
+            SQSMCResult riskResult;
+            m_root.EnterSafeMode(riskWhy,riskResult);
+            m_diagnostics.Critical("RISK_BLOCK",riskWhy);
+         }
+      }
       if(m_root.State()==QSMC_STATE_READY)
          RefreshAndEvaluate(true);
-      else if(m_root.CanOperate() && m_market.IsExecNewBar())
+      else if(m_root.CanOperate())
       {
-         m_stats.newBars++;
-         RefreshAndEvaluate(false);
+         bool newBar=m_market.IsExecNewBar();
+         if(newBar)m_stats.newBars++;
+         if(newBar || m_evaluationPending)RefreshAndEvaluate(false);
       }
       Render();
-      if(m_store.IsDirty())m_store.Save();
+      if(m_store.IsDirty() && !m_store.Save())
+      {
+         bool latched=m_safety.EmergencyStop(m_store,"state commit failed",true);
+         m_diagnostics.Critical("STATE_COMMIT",latched?"safety latch engaged":"commit/latch durability uncertain");
+         if(m_root.CanOperate()){SQSMCResult blocked;m_root.EnterSafeMode("state commit failed",blocked);}
+      }
    }
 
    void OnTradeTransaction(const MqlTradeTransaction &trans,
                            const MqlTradeRequest &request,
                            const MqlTradeResult &result)
    {
-      if(!m_initialised || !m_events.Trade() || !m_root.CanOperate())return;
+      if(!m_initialised || !m_events.Trade())return;
       // No live order path is active. Transactions are logged for audit only.
       m_logger.Info("TRADE_EVENT",StringFormat("type=%s order=%I64u deal=%I64u retcode=%u",
                                                 EnumToString(trans.type),trans.order,trans.deal,result.retcode));
@@ -422,8 +446,13 @@ public:
    {
       if(!m_initialised && m_root.State()==QSMC_STATE_CREATED)return;
       m_events.Stop();m_lifecycle.Stop();
-      if(m_store.IsDirty())m_store.Save();
+      if(m_store.IsDirty() && !m_store.Save())
+      {
+         bool latched=m_safety.EmergencyStop(m_store,"shutdown commit failed",true);
+         Print("QSMC shutdown persistence failure; latch durable=",latched);
+      }
       m_renderer.Deinit();
+      m_store.Close();
       m_root.Shutdown();
       if(m_provider!=NULL){delete m_provider;m_provider=NULL;}
       m_logger.Info("APP","stopped reason="+IntegerToString(reason));
@@ -437,11 +466,11 @@ public:
    string Diagnostics() const{return m_diagnostics.Report(5);}
    bool EmergencyStop(const string reason)
    {
-      m_safety.EmergencyStop(m_store,reason);
+      bool persisted=m_safety.EmergencyStop(m_store,reason);
       if(m_root.State()==QSMC_STATE_RUNNING)
       {SQSMCResult r;m_root.EnterSafeMode(reason,r);}
       m_diagnostics.Critical("EMERGENCY_STOP",reason);
-      Render();return true;
+      Render();return persisted;
    }
 };
 #endif // QSMC_ORCHESTRATOR_MQH

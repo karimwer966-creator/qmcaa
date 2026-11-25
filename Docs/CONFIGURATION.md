@@ -1,27 +1,73 @@
-# Configuration
+# Current configuration
 
-EA inputs are translated to `SQSMCConfig` in `Experts/QSMC/QSMC.mq5`. Core validation rejects empty/unknown symbols, invalid timeframe order, out-of-range numeric values, and REAL mode while the build gate is zero.
+The main EA maps inputs to SQSMCConfig. Order: defaults → built-in preset → explicit
+inputs. Risk/geometry fields inside `InpOverridePresetRisk` apply only when it is
+true: risk%, daily loss, spread, positions, exposure, daily trades, cooldown,
+drawdown, SL ATR multiplier, minimum/target RR and minimum confidence. Other
+strategy/time/identity inputs are applied independently. CUSTOM retains defaults
+unless explicit overrides are selected. Read actual effective-config logs; input
+labels alone do not prove an override took effect.
 
-## Defaults
+## Safe defaults and gold sets
 
-- Mode: ANALYSIS; preset: BALANCED; symbol: chart symbol.
-- Execution/HTF/LTF: M15/H4/M5; timer 1000 ms; closed bars only; 600 bars.
-- Swing widths 2/2; structure lookback 300; zone lookback 200; SVP lookback 240 / 40 bins / 70% value area.
-- Risk preset values: 0.5% per trade, 2% daily limit, 30 point spread cap, one position, 2 lots exposure, 5 trades/day, 300 second cooldown, 10% drawdown cap. These are validated configuration values; not all controls are wired into a completed execution lifecycle.
+ANALYSIS, BALANCED, chart symbol, M15/H4/M5, 1000 ms timer, 600 bars, closed bars.
+Balanced risk is 0.50%, daily loss 2%, spread 30 points, one position, two-lot
+exposure cap, five submissions/day, 300-second cooldown and 10% equity drawdown.
+Conservative uses 0.25% risk, 1% daily loss, 20 points, one position, one-lot cap,
+three submissions/day, 900-second cooldown and 6% drawdown. These are configuration
+caps, not promised loss bounds. Actual lot sizing may reject or be much smaller.
 
-## Presets and overrides
+The [two complete gold .set files](../Presets/README.md) load ANALYSIS with risk
+<=0.5%, no real acknowledgement and `InpOverridePresetRisk=false`. Both use the
+same explicit owner magic. Generic AGGRESSIVE remains 1% in source and is not a
+gold set. Generic hard risk cap remains 2%; Phase 8 does not retune policy.
 
-The preset is applied before explicit strategy inputs. To avoid every numeric input silently defeating the selected preset, risk-related inputs are applied only when `InpOverridePresetRisk=true`. When enabled, the risk inputs override the preset. `InpPreset=CUSTOM` keeps defaults unless override inputs are enabled.
+## Units and time
 
-## Setup models and filters
+Spread/deviation/zone tolerance are raw broker points, not gold dollars. Values
+are not auto-rescaled by digits; runtime point/tick/contract metadata are logged.
+Volume uses broker min/max/step. No symbol-name/suffix normalization is performed;
+confirm the exact chart/InpSymbol is the intended XAUUSD contract.
 
-The primary watch model is a completed-session range raid → displacement/MSS through a previously confirmed opposing swing → current retest of an unfilled post-MSS FVG. The secondary model is a historical displacement BOS/CHoCH proxy → retest of an unmitigated swing/displacement zone used as an OB proxy. Both require a matching non-neutral HTF close/EMA bias, an enabled London/New York window and a direction-aligned recent session liquidity raid. A setup on its own is not an order instruction. The score is a heuristic confluence scale, not a calibrated win probability.
+Existing analytical windows: Asia 02:00–08:00, London 09:00–12:00, New York
+15:00–18:00, broker-server time. Components are validated before conversion.
+Entry membership is start-inclusive/end-exclusive, supports midnight wrap and
+unions overlaps when sessions are enabled. Turning sessions off does not disable
+rollover, weekend, Friday or news gates. Analytical range ownership has separate
+open audit findings and is not certified by entry membership tests.
 
-Session inputs are minute/hour settings in broker-server time and have editable defaults Asia 02:00–08:00, London 09:00–12:00, New York 15:00–18:00. These are illustrative placeholders, not universal market-session definitions; verify the broker clock and adjust for the broker's UTC offset/DST manually. `InpMinFvgAtr` sets the minimum gap size. `InpMaxChartZones` caps displayed bias-aligned nearby zones (0–20). `InpDrawElliottLabels` and FVG drawing control chart annotations only; disabling the Elliott drawing does not disable its small optional confluence hint.
+Friday cutoff inputs default to 20:00. Mandatory rollover is 23:45–01:15; weekends
+block entries. No automatic DST session shift or forced Friday close. Offset-change
+warnings request manual review; tester clocks cannot infer historical DST.
 
-## Important limits
+News keywords are semicolon-separated, case-insensitive USD event-name fragments.
+HIGH importance is relevant regardless of keyword. Default fragments are English;
+review localization. Windows are fixed inclusive ±30 minutes, cache <15 minutes.
+`InpTesterNewsCsv` defaults blank; prospective tester entries block without valid
+covering CSV. The synthetic fixture is never a real dataset or auto-loaded fallback.
+Full schema: [Phase 5 report](../docs/04_GOLD_FILTERS_CHECKPOINT.md).
 
-- Risk percent is bounded to (0, 2%]; daily loss to (0, 5%]; max RR <= 10; timer 100–60000ms; bars <= 5000; profile bins <= 80; magic offset [0, 999999].
-- REAL acknowledgement text cannot bypass `QSMC_ALLOW_REAL=0` and the RealAdapter block.
-- Chart layers/dashboard are presentation toggles only.
-- Values affect an analytical prototype. They are not validated trading recommendations.
+## Ownership and state
+
+`InpOwnerMagic=53000001` is stable operator assignment, valid [1,2147483647]. Raw
+scope includes account login, broker server and exact symbol. Chart, timeframe,
+version and ordinary input changes do not select a different owner. Fingerprints
+log configuration drift without resetting counters/latches. `InpMagicOffset` is
+deprecated and no longer changes ownership; do not use it as a reset mechanism.
+
+Operational duplicate writers are refused. ANALYSIS/OFF use read-only state.
+Schema-2 safety state lives in Common/Files/QSMC with a scoped hash filename and
+full raw scope inside; legacy magic-only state is not auto-imported. Missing
+reviewed account/day baselines block. See [migration](MIGRATION_PLAN.md).
+
+## Modes and limits
+
+DEMO is paper simulation only. REAL remains refused independently of any exact
+acknowledgement, the deprecated QSMC_ALLOW_REAL macro or the two commented-out
+trading defines. No input releases the literal-false interlock. No normal main-EA
+intent-submission route was added.
+
+Validation includes finite numeric bounds, timeframe ordering, timer 100–60000 ms,
+bars <=5000, profile bins <=80, RR <=10 and existing generic risk caps. Validation
+is source-level and unverified on MT5. Do not interpret accepted configuration,
+RUNNING, an analytical candidate or an active chart overlay as entry permission.

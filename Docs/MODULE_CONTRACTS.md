@@ -1,5 +1,10 @@
 # Module Contracts
 
+**Current safety status:** source contracts are not MT5-certified. REAL is blocked;
+ANALYSIS default retained. Analytical rows describe intended outputs, not proven
+correctness: open FVG/ATR/ICT/causality/SVP/session findings remain. See
+[known limitations](KNOWN_LIMITATIONS.md) and the historical audit.
+
 ## Shared contracts
 
 - `SQSMCResult`: typed result code and human-readable message for lifecycle/module operations.
@@ -33,7 +38,12 @@
 | Funnel/Arbiter | valid analysis context and candidates | deterministic decision or no-trade rejections; no order side effects |
 | Safety controller | config, state store, terminal/account/symbol environment | fail-closed submit permission and incident latch |
 | Preflight | intent, config, snapshot, safety, account state | true only after parameter and safety checks; never sends |
-| Execution adapter | preflight-approved intent | simulated fill only or real-blocked response |
+| Execution adapter | checked intent plus config/root/safety/account/store context | paper fill or blocked REAL; dormant broker result envelope distinguishes accepted/fill/partial/pending/uncertain, not final lifecycle proof |
+| OwnerScope / identity | raw account/server/symbol + explicit magic | stable raw scope independent of config/chart/timeframe/version; fingerprint drift diagnostic |
+| StateCodec / StateStore | typed scalars + raw scope + writer claim | sealed alternating common-file snapshots; invalid/staging/corrupt state blocks; no destructive fallback or certified power-loss guarantee |
+| EntryFilters / NewsFilter | current server clock, configured windows, calendar or tester CSV | entry-only veto/covered news status; no inactive bypass, no risk-monitor permission or order side effects |
+| RiskManager / RiskRecovery | reviewed account/day baselines, available hedging history and positions | bounded reconstructed counters/estimated risk; uncertainty blocks, no guessed baseline or pending clearance |
+| Enrollment script | exact review token, clean flat/order-free/no-deals-today account/day | reviewed baseline writes only; preserves latches/pending/review state and does not start Root |
 | Renderer | dashboard data + optional zone value | chart comment/owned objects only; no strategy mutation |
 
 ## Strategy specification gaps

@@ -23,6 +23,7 @@ public:
    CQSMCExecutionManager(){m_mode=QSMC_EXEC_DISABLED;m_magic=0;m_initialised=false;}
    bool Init(const SQSMCConfig &cfg,const ulong magic)
    {
+      m_initialised=false;m_real.Disarm();
       if(magic==0)return false;
       m_mode=CQSMCExecutionMode::Resolve(cfg.mode);
       m_magic=magic;
@@ -46,10 +47,42 @@ public:
       {why="intent magic does not match execution-manager instance";result.code=QSMC_ERR_IDENTITY_COLLISION;result.message=why;return false;}
       SQSMCAccountState current;
       if(!m_risk.CaptureAccount(current,m_magic,store))
-      {why="account/risk snapshot unavailable";result.code=QSMC_ERR_RISK_LIMIT;result.message=why;return false;}
+      {
+         why="account/risk snapshot unavailable";
+         safety.EmergencyStop(store,why,true);
+         result.code=QSMC_ERR_RISK_LIMIT;result.message=why;return false;
+      }
       if(!m_risk.ValidateAccount(current,why))
-      {result.code=QSMC_ERR_RISK_LIMIT;result.message=why;return false;}
+      {
+         // Daily-loss/drawdown breaches remain latched across subsequent recovery.
+         // Capacity/margin limits are entry vetoes, not permanent incidents.
+         if(current.dailyLossPct>=cfg.max_daily_loss_pct || current.drawdownPct>=cfg.max_drawdown_pct)
+            safety.EmergencyStop(store,why);
+         result.code=QSMC_ERR_RISK_LIMIT;result.message=why;return false;
+      }
       return m_orders.Submit(intent,cfg,snap,root,safety,current,m_magic,store,m_demo,result,why);
+   }
+   // Called on timer even with no intent: peaks and loss stops cannot depend
+   // solely on the next attempted entry. ANALYSIS/OFF remain observational only.
+   bool MonitorRisk(const SQSMCConfig &cfg,CQSMCSafetyController &safety,
+                    CQSMCStateStore &store,string &why)
+   {
+      why="";
+      if(!m_initialised){why="risk monitor uninitialised";return false;}
+      if(m_mode==QSMC_EXEC_DISABLED)return true;
+      if(safety.IsLatched()){why=safety.Reason();return false;}
+      SQSMCAccountState current;
+      if(!m_risk.CaptureAccount(current,m_magic,store))
+      {
+         why="risk monitoring unavailable; entries blocked";
+         safety.EmergencyStop(store,why,true);return false;
+      }
+      if(current.dailyLossPct>=cfg.max_daily_loss_pct || current.drawdownPct>=cfg.max_drawdown_pct)
+      {
+         why="daily-loss/drawdown safety limit reached";
+         safety.EmergencyStop(store,why);return false;
+      }
+      return true;
    }
    ENUM_QSMC_EXECUTION_MODE Mode() const{return m_mode;}
    string Describe() const{return CQSMCExecutionMode::Name(m_mode);}

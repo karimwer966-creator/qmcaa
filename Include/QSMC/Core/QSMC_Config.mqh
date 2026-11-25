@@ -10,6 +10,7 @@
 
 #include "QSMC_Constants.mqh"
 #include "QSMC_Types.mqh"
+#include "QSMC_ExecutionGates.mqh"
 
 struct SQSMCConfig
 {
@@ -34,7 +35,7 @@ struct SQSMCConfig
    //--- risk (hard-capped)
    double               risk_percent;
    double               max_daily_loss_pct;
-   int                  max_spread_points;  // 0 = no limit
+   int                  max_spread_points;  // 0 disables analysis cap, but execution rejects 0
    int                  max_positions;
    double               max_total_exposure_lots;
    int                  max_daily_trades;
@@ -69,7 +70,13 @@ struct SQSMCConfig
    bool                 draw_elliott_labels;
    bool                 draw_fvg_zones;
 
-   long                 magic_offset;
+   // Entry-only safeguards. Fixed blackout +/-30m, refresh <15m, rollover 23:45-01:15.
+   int                  friday_cutoff_minute;
+   string               news_keywords;     // semicolon-separated, case-insensitive USD event names
+   string               tester_news_csv;   // required server-time CSV in tester; no inactive fallback
+
+   ulong                owner_magic; // stable operator assignment, never derived from inputs
+   long                 magic_offset; // deprecated; retained for caller compatibility
    int                  bars_back;
 
    //+---------------------------------------------------------------+
@@ -130,6 +137,11 @@ struct SQSMCConfig
       draw_elliott_labels  = true;
       draw_fvg_zones       = true;
 
+      friday_cutoff_minute = 1200; // approved broker-server Friday 20:00
+      news_keywords        = "NFP;NONFARM;NON-FARM;PAYROLL;CPI;CONSUMER PRICE;FOMC;FED;INTEREST RATE;PCE;PERSONAL CONSUMPTION;GDP;GROSS DOMESTIC PRODUCT;EMPLOYMENT";
+      tester_news_csv      = "";
+
+      owner_magic          = 53000001;
       magic_offset         = 0;
       bars_back            = 600;
    }
@@ -140,6 +152,9 @@ struct SQSMCConfig
    bool Validate(string &err) const
    {
       err = "";
+
+      if(symbol=="__ACCOUNT_RISK__")
+      {err="reserved account-risk scope is not a trading symbol";return false;}
 
       //--- mode -------------------------------------------------------
       if(mode != QSMC_MODE_OFF && mode != QSMC_MODE_ANALYSIS &&
@@ -267,16 +282,24 @@ struct SQSMCConfig
       { err = "max_chart_zones outside [0,20]"; return false; }
 
       //--- magic ------------------------------------------------------
+      if(owner_magic==0 || owner_magic>2147483647)
+      {err="owner_magic must be in [1,2147483647]";return false;}
       if(magic_offset < 0 || magic_offset >= QSMC_MAGIC_RANGE)
       { err = "magic_offset outside [0," + IntegerToString(QSMC_MAGIC_RANGE - 1) + "]"; return false; }
+
+      if(friday_cutoff_minute<0 || friday_cutoff_minute>=1440)
+      {err="Friday cutoff must be a broker-server minute in [0,1439]";return false;}
+      if(StringLen(news_keywords)==0 || StringLen(news_keywords)>1024 ||
+         StringLen(tester_news_csv)>512 || StringFind(tester_news_csv,"..")>=0 ||
+         StringFind(tester_news_csv,":")>=0)
+      {err="invalid news keywords or relative tester CSV path";return false;}
 
       //--- REAL mode gate ---------------------------------------------
       if(mode == QSMC_MODE_REAL)
       {
-         if(QSMC_ALLOW_REAL != 1)
-         { err = "REAL mode is disabled in this build (QSMC_ALLOW_REAL=0)"; return false; }
-         if(real_ack != QSMC_REAL_ACK_TOKEN)
-         { err = "REAL mode requires the acknowledgement token"; return false; }
+         if(!CQSMCExecutionGates::EnvironmentPermits(real_ack,err))return false;
+         if(!CQSMCExecutionGates::ReleaseApproved())
+         {err=CQSMCExecutionGates::ReleaseReason();return false;}
       }
 
       return true;

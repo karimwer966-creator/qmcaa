@@ -147,6 +147,10 @@ public:
       AddBool("draw_elliott",c.draw_elliott_labels);
       AddBool("draw_fvg",c.draw_fvg_zones);
 
+      AddInt("friday_cutoff",c.friday_cutoff_minute);
+      AddString("news_keywords",c.news_keywords);
+      AddString("tester_news_csv",c.tester_news_csv);
+      AddString("owner_magic",StringFormat("%I64u",c.owner_magic));
       AddInt("magic_offset",   c.magic_offset);
    }
 
